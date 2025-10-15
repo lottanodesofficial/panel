@@ -1,0 +1,104 @@
+#!/bin/bash
+# ===========================================
+# 🐉 Simple Pterodactyl Wings Installer
+# Author: Azim
+# ===========================================
+
+echo "🚀 Installing Pterodactyl Wings (Simplified Setup)..."
+
+# === Update & Install Requirements ===
+apt update -y && apt upgrade -y
+apt install -y curl docker.io docker-compose certbot -qq
+
+# === Create directories ===
+mkdir -p /etc/pterodactyl /var/lib/pterodactyl/volumes
+cd /etc/pterodactyl
+
+# === Download latest Wings binary ===
+echo "⬇️ Downloading latest Wings release..."
+curl -L -o wings https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64
+chmod +x wings
+
+# === Ask for configuration ===
+read -p "🛠️  Do you want to configure Wings now? (y/n): " configure_now
+
+if [[ "$configure_now" =~ ^[Yy]$ ]]; then
+  echo ""
+  echo "⚙️  Enter your Pterodactyl configuration details:"
+  read -p "🌐 Panel URL (e.g., https://panel.example.com): " PANEL_URL
+  read -p "🧩 Node UUID: " NODE_UUID
+  read -p "🔑 Token ID: " TOKEN_ID
+  read -p "🪙 Token: " TOKEN
+
+  read -p "🔒 Enable SSL? (y/n): " ENABLE_SSL
+  if [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
+    read -p "📄 SSL Cert Path: " SSL_CERT
+    read -p "🔑 SSL Key Path: " SSL_KEY
+    SSL_ENABLED="true"
+    API_PORT=443
+  else
+    SSL_ENABLED="false"
+    SSL_CERT=""
+    SSL_KEY=""
+    API_PORT=8080
+  fi
+
+  # === Write configuration file ===
+  echo "📝 Writing /etc/pterodactyl/config.yml..."
+  cat > /etc/pterodactyl/config.yml <<EOF
+debug: false
+uuid: $NODE_UUID
+token_id: $TOKEN_ID
+token: $TOKEN
+api:
+  host: 0.0.0.0
+  port: $API_PORT
+  ssl:
+    enabled: $SSL_ENABLED
+    cert: $SSL_CERT
+    key: $SSL_KEY
+  upload_limit: 100
+system:
+  data: /var/lib/pterodactyl/volumes
+  sftp:
+    bind_port: 2022
+allowed_mounts: []
+remote: '$PANEL_URL'
+EOF
+
+else
+  echo "⚙️  Skipping configuration. Edit /etc/pterodactyl/config.yml manually later."
+fi
+
+# === Setup systemd service ===
+echo "🧩 Setting up systemd service..."
+cat > /etc/systemd/system/wings.service <<'EOF'
+[Unit]
+Description=Pterodactyl Wings Daemon
+After=docker.service
+Requires=docker.service
+
+[Service]
+User=root
+WorkingDirectory=/etc/pterodactyl
+LimitNOFILE=4096
+ExecStart=/etc/pterodactyl/wings
+Restart=on-failure
+StartLimitInterval=180
+StartLimitBurst=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# === Enable & start Wings ===
+systemctl daemon-reload
+systemctl enable wings
+systemctl start wings
+
+# === Done ===
+echo ""
+echo "✅ Wings installation complete!"
+echo "🧠 To edit config: nano /etc/pterodactyl/config.yml"
+echo "🔁 Restart Wings with: systemctl restart wings"
+echo "🔍 Check status with: systemctl status wings --no-pager"
